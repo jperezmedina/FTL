@@ -1,0 +1,821 @@
+<!--
+/**
+ *
+ * The !FTL, an Articulation-Invariant Stroke Gesture Recognizer with Controllable Position, 
+ * Scale, and Rotation Invariances (JavaScript version)
+ *
+ *  Jean Vanderdonckt
+ *  Université catholique de Louvain, UCL
+ *  Louvain-la-neuve, Belgium
+ *  jean.vanderdonckt@uclouvain.be
+ *
+ *  Paolo Roselli
+ *  Université catholique de Louvain, UCL
+ *  Louvain-la-neuve, Belgium
+ *  paolo.roselli@uclouvain.be
+ *
+ *  Jorge-Luis Pérez-Medina
+ *  Universidad de Las Américas, UDLA
+ *  Quito, Ecuador
+ *  jorge.perez.medina@udla.edu.ec 
+ *
+ * Please cite these papers in your publications if it helps your research:
+ *
+ * @inproceedings{10.1145/3242969.3243032,
+ *    author = {Vanderdonckt, Jean and Roselli, Paolo and P\'{e}rez-Medina, Jorge Luis},
+ *    title = {!!FTL, an Articulation-Invariant Stroke Gesture Recognizer with Controllable
+ *    Position, Scale, and Rotation Invariances},
+ *    year = {2018},
+ *    isbn = {9781450356923},
+ *    publisher = {Association for Computing Machinery},
+ *    address = {New York, NY, USA},
+ *    url = {https://doi.org/10.1145/3242969.3243032},
+ *    doi = {10.1145/3242969.3243032},
+ *    booktitle = {Proceedings of the 20th ACM International Conference on Multimodal
+ *     Interaction},
+ *    pages = {125–134},
+ *    numpages = {10},
+ *    keywords = {isoparameterization, local shape distance, articulation invariance, 
+ *    isochronicity, isometricity, stroke gesture recognition},
+ *    location = {Boulder, CO, USA},
+ *    series = {ICMI ’18}
+ * }
+ *
+ * This software is distributed under the License (GNU GENERAL PUBLIC LICENSE) 
+ *
+ * Copyright (C) 2018, Jean Vanderdonckt, Paolo Roselli, and
+ * Jorge-Luis Pérez-Medina. All rights reserved. Last updated October 16, 2018.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.
+ * This is free software, and you are welcome to redistribute it
+ * under certain conditions; type `show c' for details.
+ *
+ * The hypothetical commands `show w' and `show c' should show the appropriate
+ * parts of the General Public License.  Of course, your program's commands
+ * might be different; for a GUI interface, you would use an "about box".
+ *
+ * You should also get your employer (if you work as a programmer) or school,
+ * if any, to sign a "copyright disclaimer" for the program, if necessary.
+ * For more information on this, and how to apply and follow the GNU GPL, see
+ * <https://www.gnu.org/licenses/>.
+ *
+ * The GNU General Public License does not permit incorporating your program
+ * into proprietary programs.  If your program is a subroutine library, you
+ * may consider it more useful to permit linking proprietary applications with
+ * the library. If this is what you want to do, use the GNU Lesser General
+ * Public License instead of this License.  But first, please read
+ * <https://www.gnu.org/licenses/why-not-lgpl.html>.
+ *
+**/
+-->
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+    <title>Vector-based Gesture Recognition</title>
+    <link rel="stylesheet" href="css/bootstrap.min.css" rel="stylesheet" type="text/css">
+    <link rel="stylesheet" href="css/bootstrap-theme.min.css" rel="stylesheet" type="text/css">
+    <link rel="stylesheet" href="css/bootstrap-toggle.min.css" rel="stylesheet" type="text/css">
+    <!--[if IE]><script src="excanvas.js"></script><![endif]-->
+    <script type="text/javascript" src="js/canvas.js"></script>
+    <script type="text/javascript" src="js/vector.js"></script>
+    <script type="text/javascript" src="js/jquery-3.1.1.min.js"></script>
+    <script type="text/javascript" src="js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="js/bootbox.min.js"></script>
+    <script type="text/javascript" src="js/bootstrap-toggle.min.js"></script>
+
+    <style>
+        .row {
+            margin-top: 5px;
+            padding: 0 4px;
+        }
+        
+        .clickable {
+            cursor: pointer;
+        }
+        
+        .panel-heading span {
+            margin-top: -20px;
+            font-size: 15px;
+        }
+        .panel-primary {
+            margin-bottom: -2px;
+        }
+    </style>
+    
+    <script type="text/javascript">
+        $(document).on('click', '.panel-heading span.clickable', function (e) {
+            var $this = $(this);
+            if (!$this.hasClass('panel-collapsed')) {
+                $this.parents('.panel').find('.panel-body').slideDown();
+                $this.addClass('panel-collapsed');
+                $this.find('i').removeClass('glyphicon glyphicon-chevron-up').addClass('glyphicon glyphicon-chevron-down');
+            } else {
+                $this.parents('.panel').find('.panel-body').slideUp();
+                $this.removeClass('panel-collapsed');
+                $this.find('i').removeClass('glyphicon glyphicon-chevron-down').addClass('glyphicon glyphicon-chevron-up');
+            }
+        })
+    </script>
+
+
+    <script type="text/javascript">
+        
+        var firstTime = true;
+        var _isDown, _X, _strokeID, _v, canvas, _g, _gTemp, _rc, _rcTemp;
+        var _isTouching;
+        var sizePoint = 20;
+        var intervalSimulation;
+
+        var _results = new Array();
+        var _resultsNLSD = new Array();
+        var _resultsAverages = new Array();
+        var canSave = true;
+        var dialog;
+
+        // Calculate the rotation of a point(x,y) in 2D
+        // the Point(cx,cy) is the rotation center 
+        function rotate(cx, cy, x, y, angle) {
+            var radians = (Math.PI / 180) * angle,
+                cos = Math.cos(radians),
+                sin = Math.sin(radians),
+                nx = (cos * (x - cx)) + (sin * (y - cy)) + cx,
+                ny = (cos * (y - cy)) - (sin * (x - cx)) + cy;
+            return [nx, ny];
+        }
+
+        function resize_canvas() {
+            canvas = document.getElementById("myCanvas");
+            if (canvas.width < window.innerWidth) {
+                canvas.width = window.innerWidth;
+            }
+
+            if (canvas.height < window.innerHeight) {
+                canvas.height = window.innerHeight - 80;
+            }
+        }
+        
+        function Save(d, labelMethod, _res, labelExtension) {
+            var text = "Date: " + d + "\n";
+            text = text + labelMethod;
+            text = text + "Records: " + _res.length + "\n";
+            for (var i = 0; i < _res.length; i++) {
+                text = text + _res[i].Name + ", " + _res[i].NumberOfPoints + ", " + _res[i].Score + ", " + _res[i].Time + "\n"
+            }
+            var pom = document.createElement('a');
+            pom.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+            pom.setAttribute('download', d + labelExtension);
+            document.body.appendChild(pom);
+            pom.click();
+            document.body.removeChild(pom);
+        }
+
+        function saveFile() {
+            var d = new Date(Date.now()).toLocaleString();
+            
+            //save the results for !FTL with the method LSD
+            Save(d, "!FTL(LSD)\n", _results, "_!FTL_LSD.txt");
+            
+            //save the results for !FTL with the method NLSD
+            Save(d, "!FTL(NLSD)\n", _resultsNLSD, "_!FTL_NLSD.txt");
+
+            //save the vector of gestures evaluated
+            saveGesturesEvaluated(d);
+        }
+        
+        function saveGesturesEvaluated(d) {
+            var pom = document.createElement('a');
+
+            var jsonF = new Array();
+            jsonF.push( _v.getComparedGestures() );            
+            
+            var text = JSON.stringify(jsonF) + "\n";
+            
+            pom.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+            pom.setAttribute('download', "GesturesEvaluated" + d + ".txt");
+            
+            document.body.appendChild(pom);
+            pom.click();
+            document.body.removeChild(pom);
+        }
+
+        function ElapsedTime(a) {
+            var d = parseInt(a % 1E3 / 100),
+                b = parseInt(a / 1E3 % 60),
+                c = parseInt(a / 6E4 % 60);
+            a = parseInt(a / 36E5 % 24);
+            return (10 > a ? "0" + a : a) + ":" + (10 > c ? "0" + c : c) + ":" + (10 > b ? "0" + b : b) + "." + d
+        }
+
+        function onLoadEvent() {
+            resize_canvas();
+            _X = new Array(); // point array for current stroke
+            _strokeID = 0;
+            _v = new VectorAlgorithm();
+
+            (_v.getLenghtRPs() === 0) ? $('#compareGesture').prop('disabled', true):
+                $('#compareGesture').prop('disabled', false);
+
+            (_v.getLenghtRPs() === 0) ? $('#ExportGestures').prop('disabled', true):
+                $('#ExportGestures').prop('disabled', false);
+
+            (_v.getLenghtRPs() === 0) ? $('#export').prop('disabled', true):
+                $('#export').prop('disabled', false);
+
+            (_results === 0) ? $('#CompareDataSets').prop('disabled', true):
+                $('#CompareDataSets').prop('disabled', false);
+
+            document.getElementById('files').addEventListener('change', onClickLoadGestures, false);
+
+
+            canvas = document.getElementById('myCanvas');
+            _g = canvas.getContext('2d');
+            _g.lineWidth = 2;
+            _g.font = "16px Gentilis";
+            _rc = getCanvasRect(canvas); // canvas rect on page
+            _isDown = false;
+            
+            canvas.addEventListener('touchstart', onTouchStart, false);
+            canvas.addEventListener('touchmove', onTouchMove, false);
+            canvas.addEventListener('touchend', onTouchEnd, false);
+            canvas.addEventListener('touchcancel', onTouchEnd, false);
+            canvas.addEventListener("touchleave", onTouchEnd, false);
+        }
+
+        function getCanvasRect(canvas) {
+            var w = canvas.width;
+            var h = canvas.height;
+
+            var cx = canvas.offsetLeft;
+            var cy = canvas.offsetTop;
+            while (canvas.offsetParent != null) {
+                canvas = canvas.offsetParent;
+                cx += canvas.offsetLeft;
+                cy += canvas.offsetTop;
+            }
+            return {
+                x: cx,
+                y: cy,
+                width: w,
+                height: h
+            };
+        }
+
+        function getScrollY() {
+            var scrollY = $(window).scrollTop();
+            return scrollY;
+        }
+            
+        //
+        // Touch Events
+        //
+        function onTouchStart(evt) {
+            _isTouching = true;
+            
+            evt.preventDefault();
+            evt.stopPropagation();
+            
+            var touchList = evt.changedTouches;
+            var i = 0;
+            
+            for (; i < touchList.length; i++) {                
+                var x = touchList[i].clientX;
+                var y = touchList[i].clientY;
+                
+                x -= _rc.x;
+                y -= _rc.y - getScrollY();
+                
+                if (_strokeID == 0) // starting a new gesture
+                {
+                    _X.length = 0;
+                    _g.clearRect(0, 0, _rc.width, _rc.height);
+                }
+                _X[_X.length] = new Point(x, y, ++_strokeID);
+                drawText("Recording stroke #" + _strokeID + "...");
+                var clr = "rgb(" + rand(0, 200) + "," + rand(0, 200) + "," + rand(0, 200) + ")";
+                _g.strokeStyle = clr;
+                _g.fillStyle = clr;
+                _g.fillRect(x - 4, y - 3, 9, 9); //create the rectangle at the initial point of the stroke     
+            }  
+        }
+        
+        function onTouchMove(evt) {
+            evt.preventDefault();
+            evt.stopPropagation();
+            
+            var touchList = evt.changedTouches;
+            var i = 0;
+            
+            for (; i < touchList.length; i++) {                
+                var x = touchList[i].clientX;
+                var y = touchList[i].clientY;
+                
+                if (_isTouching) {
+                    x -= _rc.x;
+                    y -= _rc.y - getScrollY();
+                    _X[_X.length] = new Point(x, y, _strokeID); //append
+                    drawConnectedPoint(_X.length - 2, _X.length - 1);                  
+                }  
+            }
+        }
+        
+        function onTouchEnd(evt) {
+            evt.preventDefault();
+            evt.stopPropagation();                
+            if (_isTouching) {
+                _isTouching = false;
+                drawText("Stroke #" + _strokeID + " recorded.");
+            }  
+        }
+        
+        //
+        // Mouse Events
+        //
+        function mouseDownEvent(x, y, button) {
+            document.onselectstart = function () {
+                    return false;
+                } // disable drag-select
+            document.onmousedown = function () {
+                    return false;
+                } // disable drag-select
+            if (button <= 1) {
+                _isDown = true;
+                x -= _rc.x;
+                y -= _rc.y - getScrollY();
+                if (_strokeID == 0) // starting a new gesture
+                {
+                    _X.length = 0;
+                    _g.clearRect(0, 0, _rc.width, _rc.height);
+                }
+                _X[_X.length] = new Point(x, y, ++_strokeID);
+                drawText("Recording stroke #" + _strokeID + "...");
+                var clr = "rgb(" + rand(0, 200) + "," + rand(0, 200) + "," + rand(0, 200) + ")";
+                _g.strokeStyle = clr;
+                _g.fillStyle = clr;
+                _g.fillRect(x - 4, y - 3, 9, 9); //create the rectangle at the initial point of the stroke
+            }
+        }
+
+        function mouseMoveEvent(x, y, button) {
+            if (_isDown) {
+                x -= _rc.x;
+                y -= _rc.y - getScrollY();
+                _X[_X.length] = new Point(x, y, _strokeID); //append
+                drawConnectedPoint(_X.length - 2, _X.length - 1);
+            }
+        }
+
+        function mouseUpEvent(x, y, button) {
+            document.onselectstart = function () {
+                    return true;
+                } // enable drag-select
+            document.onmousedown = function () {
+                    return true;
+                } // enable drag-select
+            if (button <= 1) {
+                if (_isDown) {
+                    _isDown = false;
+                    drawText("Stroke #" + _strokeID + " recorded.");
+                }
+            }
+        }
+
+        function drawConnectedPoint(from, to) {            
+            _g.beginPath();
+            _g.moveTo(_X[from].X, _X[from].Y);
+            _g.lineTo(_X[to].X, _X[to].Y);
+            _g.closePath();
+            _g.stroke();
+        }
+
+        function drawText(str) {
+            labelResult.textContent = str;
+        }
+
+        function rand(low, high) {
+            return Math.floor((high - low + 1) * Math.random()) + low;
+        }
+
+        function round(n, d) // round 'n' to 'd' decimals
+        {
+            d = Math.pow(10, d);
+            return Math.round(n * d) / d
+        }
+
+        function onClickClearStrokes() {
+            _X.length = 0;
+            _strokeID = 0;
+            _g.clearRect(0, 0, _rc.width, _rc.height);
+            $("#name").val("");
+            drawText("Canvas cleared.");
+        }
+        
+        function addImageToCanvas(idDiv, image) {
+            var elem = document.createElement("img");
+            elem.setAttribute("src", image);
+            elem.setAttribute("width", _rc.width);
+            elem.setAttribute("height", _rc.height);
+            document.getElementById(idDiv).appendChild(elem);
+        }
+        
+        
+        function createImageWithGesture(name, points, format, threshold, displayPoint) {
+            
+            var cvas = document.createElement("canvas")
+            document.getElementById("tempCanvas").appendChild(cvas);
+            
+            cvas.width = _rc.width;
+            cvas.height = _rc.height;
+            
+            var ctx = cvas.getContext('2d');
+            ctx.lineWidth = 2;
+            ctx.font = "16px Gentilis";
+            
+            var i = 0;
+            var strokeId = -1;
+            var clr;
+            
+            ctx.beginPath();
+            clr = "rgb(221,221,221)";
+            ctx.strokeStyle = clr;
+            ctx.fillStyle = clr;
+            ctx.fillRect(0, 0, _rc.width, _rc.height);
+       
+            clr = "rgb(0,0,0)";
+            ctx.strokeStyle = clr;
+            ctx.fillStyle = clr;
+            if (name == "") {
+                name = "[empty]";
+            }
+            ctx.fillText(name + "/" + points.length + "/" + format + "/" + threshold, 10, 20);
+            ctx.closePath();
+            ctx.stroke();
+            
+            for (; i < points.length; i++) {
+                ctx.beginPath();
+                if (points[i].ID != strokeId) {
+                    //new stroke
+                    //create the point for new stroke
+                    clr = "rgb(" + rand(0, 200) + "," + rand(0, 200) + "," + rand(0, 200) + ")";
+                    ctx.strokeStyle = clr;
+                    ctx.fillStyle = clr;
+                    ctx.fillRect(points[i].X - 4, points[i].Y - 3, 9, 9);
+                    strokeId = points[i].ID;
+                } else {
+                    ctx.moveTo(points[i-1].X, points[i-1].Y);
+                    ctx.lineTo(points[i].X, points[i].Y);                    
+                    if (displayPoint) {
+                        //display the point 
+                        ctx.fillRect(points[i].X - 4, points[i].Y - 3, 5, 5);
+                    }  
+                }
+                ctx.closePath();
+                ctx.stroke();             
+            }
+            
+            var image = cvas.toDataURL("image/png");
+            
+            /*
+            var doc = document.createElement('a');
+            doc.setAttribute('href', image);
+            doc.setAttribute('width', _rc.width);
+            doc.setAttribute('height', _rc.height);
+            doc.setAttribute('download', name);
+            document.body.appendChild(doc);
+            doc.click();
+            document.body.removeChild(doc);
+            */
+            
+            return image;  
+        }
+        
+
+        function onClickExportGestures() {
+            var d = new Date(Date.now()).toLocaleString();
+            var pom = document.createElement('a');
+
+            var jsonF = new Array();
+            jsonF.push( _v.getRPs() );            
+            
+            var text = JSON.stringify(jsonF) + "\n";
+            
+            pom.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+            
+            pom.setAttribute('download', "DataSet" + d + ".txt");
+            document.body.appendChild(pom);
+            pom.click();
+            document.body.removeChild(pom);
+        }
+
+        function onClickLoadGestures(evt) {
+            // Check for the various File API support.
+            if (window.File && window.FileReader && window.FileList && window.Blob) {
+                // Great success! All the File APIs are supported.
+                var files = document.getElementById('files').files;
+                if (!files.length) {
+                    drawText("Please select a file.");
+                    return;
+                }
+
+                var file = files[0];
+                var reader = new FileReader();
+
+                reader.onloadend = function (evt) {
+                    if (evt.target.readyState == FileReader.DONE) {
+                        // DONE == 2
+
+                        var opt = 0;
+                        bootbox.confirm({
+                            title: "Load Gestures?",
+                            message: "Do you want to delete the actual Training Gestures? This cannot be undone.",
+                            buttons: {
+                                cancel: {
+                                    label: '<i class="fa fa-times"></i> No'
+                                },
+                                confirm: {
+                                    label: '<i class="fa fa-check"></i> Yes'
+                                }
+                            },
+                            callback: function (result) {
+                                var $btn = $('#compareGesture').button('loading')
+                                opt = result ? 0 : 1;
+                                var j = evt.target.result;
+
+                                var d = JSON.parse(j);
+                                _v.setRPs(d[0], opt);
+                                
+                                var i = 0;
+                                var data = d[0];
+                                for (; i < data.length; i++) {
+                                    addImageToCanvas("detailOfGestures", createImageWithGesture(data[i].Name, data[i].Points, data[i].Format, data[i].Threshold, true) );
+                                }
+
+                                document.getElementById('files').value = "";
+                                drawText(d.length + " gestures added.");
+                                
+                                $btn.button('reset')
+                                
+                                $('#ExportGestures').prop('disabled', false);
+                            }
+                        });
+                    }
+                };
+                var blob = file.slice(0, file.size);
+                var f = reader.readAsBinaryString(blob);
+            } else {
+                drawText("The File APIs are not fully supported in this browser.");
+            }
+        }
+
+
+        function onClickSaveGestureAs(_X, nroPoints, threshold) {
+            if (_X.length >= 8) {
+                var $btn1 = $('#compareGesture').button('loading');
+                var $btn2 = $('#ExportGestures').button('loading');                
+                
+                _v.SaveAs(_X, nroPoints, $("#name").val(), "ISO-chrone", threshold);
+               
+                addImageToCanvas("detailOfGestures", createImageWithGesture($("#name").val(), _X, "ISO-chrone", threshold, true) );
+                
+                addImageToCanvas("detailOfGestures", createImageWithGesture("Interpolated_" + $("#name").val(), Interpolate_Gesture(_X), "ISO-chrone", threshold, true) );
+                
+                $btn1.button('reset');
+                $btn2.button('reset');
+                
+                $('#ExportGestures').prop('disabled', false);     
+                
+            } else {
+                drawText("Too little input made. Please try again.");
+            }
+            _strokeID = 0; // signal to begin new gesture on next mouse-down
+        }
+
+        function onClickCompareGesture() {
+            
+            //_X = _v.createFakeEvaluatedGesture();  
+            
+            if (_X.length >= 8) {
+                if ($("#Threshold").val() == "") {
+                    $("#Threshold").val(+Infinity);
+                }
+                
+                if ( Number($('#numberOfPoints').val()) == 0) {
+                    $("#numberOfPoints").val(32);
+                }                
+                
+                var name = $("#name").val(); 
+                if (name == "") name = "-";
+                
+                //_v.createFakeGestureDatabase(name, "ISO-chrone", $("#Threshold").val());
+                
+                addImageToCanvas("detailOfComparedGestures", createImageWithGesture(name, _X, "ISO-chrone", $("#Threshold").val(), true) );
+                
+                addImageToCanvas("detailOfComparedGestures", createImageWithGesture("Interpolated_" + name, Interpolate_Gesture(_X), "ISO-chrone", $("#Threshold").val(), true) );
+                
+                _v.SaveComparedGesture(_X, Number($('#numberOfPoints').val()), name, "ISO-chrone", $("#Threshold").val());
+                
+                var result = _v.CompareGesture(_X, Number($('#numberOfPoints').val()), Number($("#Threshold").val()), "ISO-chrone", $('#orientation:checked').val(), "LSD");
+                var r1 = "(!FTL(LSD): " + result.Name + " - Distance: " + round(result.Score, 8) + "  Time: " + result.Time + " milliseconds).";
+                _results[_results.length] = result;
+                
+                result = _v.CompareGesture(_X, Number($('#numberOfPoints').val()), Number($("#Threshold").val()), "ISO-chrone", $('#orientation:checked').val(), "NLSD");
+                var r2 = "  - (!FTL(NLSD): " + result.Name + " - Distance: " + round(result.Score, 8) + "  Time: " + result.Time + " milliseconds).";
+                _resultsNLSD[_resultsNLSD.length] = result;
+
+                drawText(r1 + r2);
+
+                var $btn = $('#export').button('loading');
+                $btn.button('reset')
+            } else {
+                drawText("Too little input made for the gesture. Please try again.");
+            }
+            _strokeID = 0; // signal to begin new gesture on next mouse-down
+        }
+    </script>
+</head>
+
+<body onload="onLoadEvent()">
+
+    <div class="row">
+        <div class="col-md-12">
+            <h4>!FTL</h4>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-2">
+            <input type="text" id="name" class="form-control" placeholder="Type name here..." style="width:100%">
+        </div>
+        
+        <div class="col-md-2">
+            <div class="input-group">
+                <input type="TextBox" ID="numberOfPoints" Class="form-control" placeholder="Points number...">
+                <div class="input-group-btn">
+                    <button type="button" class="btn btn-primary dropdown-toggle" data-toggle="dropdown">
+                        <span class="caret"></span>
+                    </button>
+                    <ul id="precision" class="dropdown-menu">
+                        <li><a href="#">8</a></li>
+                        <li><a href="#">16</a></li>
+                        <li><a href="#">32</a></li>
+                        <li><a href="#">64</a></li>
+                        <li><a href="#">128</a></li>
+                    </ul>
+                    <script>
+                        $(".dropdown-menu li a").click(function () {
+                            $('#numberOfPoints').val($(this).text());
+                        });
+                    </script>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-2">
+            <button type="button" id="compareGesture" data-loading-text="Processing..." class="btn btn-primary" autocomplete="off" style="width:100%">
+                Compare Gesture
+            </button>
+            <script>
+                $('#compareGesture').on('click', function () {
+                    var $btn = $(this).button('loading')
+                    onClickCompareGesture();
+                    $btn.button('reset')
+                })
+            </script>
+        </div>
+
+        <div class="col-md-2">
+            <button type="button" id="SaveAs" data-loading-text="Processing..." class="btn btn-primary" autocomplete="off" style="width:100%">
+                Save Gesture
+            </button>
+            <script>
+                $('#SaveAs').on('click', function () {
+                    var $btn = $(this).button('loading')
+                    
+                    if ($("#Threshold").val() == "") {
+                        $("#Threshold").val(+Infinity);
+                    }
+                    
+                    if ( Number($('#numberOfPoints').val()) == 0) {
+                        $("#numberOfPoints").val(32);
+                    }
+                    
+                    onClickSaveGestureAs(_X, Number($('#numberOfPoints').val()), $("#Threshold").val());
+                    $btn.button('reset')
+                })
+            </script>
+        </div>
+
+
+        <div class="col-md-2">
+            <div class="checkbox">
+                <label>
+                    <input type="checkbox" id="orientation" name="orientation">Orientation</label>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="row">
+
+        <div class="col-md-2">
+            <input type="text" id="Threshold" class="form-control" style="width:100%" placeholder="Threshold...">
+        </div>
+
+        <div class="col-md-2">
+            <button type="button" id="clear" data-loading-text="Cleaning..." class="btn btn-primary" autocomplete="off" style="width:100%">
+                Clear
+            </button>
+            <script>
+                $('#clear').on('click', function () {
+                    var $btn = $(this).button('loading')
+                    onClickClearStrokes();
+                    $btn.button('reset');
+                })
+            </script>
+        </div>
+
+        <div class="col-md-2">
+            <label class="btn btn-primary btn-file" style="width:100%"> Load Gestures
+                <input type="file" id="files" name="files" class="hidden">
+            </label>
+        </div>
+
+        <div class="col-md-2">
+            <button type="button" id="ExportGestures" data-loading-text="Processing..." class="btn btn-primary" autocomplete="off" style="width:100%">
+                Export Gestures
+            </button>
+            <script>
+                $('#ExportGestures').on('click', function () {
+                    var $btn = $(this).button('loading')
+                    onClickExportGestures();
+                    $btn.button('reset')
+                })
+            </script>
+        </div>
+
+
+        <div class="col-md-2">
+            <button type="button" id="export" data-loading-text="Saving..." class="btn btn-primary" autocomplete="off" style="width:100%">
+                Export File
+            </button>
+            <script>
+                $('#export').on('click', function () {
+                    var $btn = $(this).button('loading')
+                    saveFile();
+                    $btn.button('reset')
+                })
+            </script>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12">
+            <div class="panel panel-primary">
+                <div class="panel-heading">
+                    <h3 class="panel-title">Gestures</h3>
+                    <span class="pull-right clickable"><i class="glyphicon glyphicon-chevron-down"></i></span>
+                </div>
+                    <div id="detailOfGestures" class="panel-body collapse">Loaded Gestures<p></div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="row">
+        <div class="col-md-12">
+            <div class="panel panel-primary">
+                <div class="panel-heading">
+                    <h4 id="labelResult" class="panel-title" style="color:yellow;">Make strokes on this canvas</h4>
+                    <span class="pull-right clickable"><i class="glyphicon glyphicon-chevron-down"></i></span>
+                </div>
+                <div id="detailOfComparedGestures" class="panel-body panel-body collapse">Gestures Evaluated<p></div>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="Canvas">
+        <canvas id="myCanvas" style="background-color:#dddddd" 
+                onmousedown="mouseDownEvent(event.clientX, event.clientY, event.button)" onmousemove="mouseMoveEvent(event.clientX, event.clientY, event.button)" onmouseup="mouseUpEvent(event.clientX, event.clientY, event.button)" 
+                oncontextmenu="return false;">
+            <span style="background-color:#ffff88;">The &lt;canvas&gt; element is not supported by this browser.</span>
+        </canvas>
+    </div>
+    <canvas id="tempCanvas" width="1000" height="1000" style="background-color:#dddddd" class="hidden"></canvas>
+</body>
+
+</html>
